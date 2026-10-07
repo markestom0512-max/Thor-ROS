@@ -42,9 +42,12 @@ private:
   LibSerial::SerialPort thor_;
   std::string port_, board_type_;
   std::vector<double> position_commands_;
-  std::vector<int> curr_angles_;
-  std::vector<int> prev_angles_;
+  std::vector<double> curr_angles_;
+  std::vector<double> prev_angles_;
   std::vector<double> position_states_;
+
+  // Minimum change (degrees) before a new arm command is emitted
+  double angle_epsilon_ = 0.1;
 
   bool homed_;
   std::string status_;

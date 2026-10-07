@@ -2,8 +2,17 @@
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <pluginlib/class_list_macros.hpp>
 
+#include <cmath>
+#include <cstdio>
+
 namespace thor_controller
 {
+
+namespace
+{
+// The gripper tolerates a coarser threshold than the arm joints (degrees)
+constexpr double kGripperEpsilon = 1.0;
+}
 
 ThorInterface::ThorInterface()
 {
@@ -74,8 +83,8 @@ CallbackReturn ThorInterface::on_activate(const rclcpp_lifecycle::State &previou
 
   // Reset commands and states
   position_commands_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-  curr_angles_ = {0, 0, 0, 0, 0, 0, 0};
-  prev_angles_ = {0, 0, 0, 0, 0, 0, 0};
+  curr_angles_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  prev_angles_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   position_states_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
   try{
@@ -267,86 +276,83 @@ hardware_interface::return_type ThorInterface::read(const rclcpp::Time &time, co
 }
 
 hardware_interface::return_type ThorInterface::write(const rclcpp::Time &time, const rclcpp::Duration &period){
-  // Calculate angles
-  int art1 = -90 + static_cast<int>(((position_commands_.at(0) + (M_PI / 2)) * 180) / M_PI);
-  int art2 = 90 - static_cast<int>(((position_commands_.at(1) + (M_PI / 2)) * 180) / M_PI);
-  int art3 = 90 - static_cast<int>(((position_commands_.at(2) + (M_PI / 2)) * 180) / M_PI);
-  int art4 = static_cast<int>(((position_commands_.at(3)) * 180) / M_PI);
-  int art5 = static_cast<int>(((-position_commands_.at(4)) * 180) / M_PI);
-  int art6 = static_cast<int>(((position_commands_.at(5)) * 180) / M_PI);
+  // Calculate angles in degrees.
+  // art2, art3 and art5 are inverted with respect to the URDF convention
+  double art1 = (position_commands_.at(0) * 180) / M_PI;
+  double art2 = -(position_commands_.at(1) * 180) / M_PI;
+  double art3 = -(position_commands_.at(2) * 180) / M_PI;
+  double art4 = (position_commands_.at(3) * 180) / M_PI;
+  double art5 = -(position_commands_.at(4) * 180) / M_PI;
+  double art6 = (position_commands_.at(5) * 180) / M_PI;
 
-  int m_art5 = art5 + 2 * art6;
-  int m_art6 = -1 * art5 + 2 * art6;
+  double m_art5 = art5 + 2 * art6;
+  double m_art6 = -1 * art5 + 2 * art6;
 
-  int end_effector = static_cast<int>(180 + (position_commands_.at(6) * 180 / M_PI));
+  double end_effector = 180 + (position_commands_.at(6) * 180 / M_PI);
 
   curr_angles_ = {art1, art2, art3, art4, m_art5, m_art6, end_effector};
 
-  if(curr_angles_ == prev_angles_){
-    return hardware_interface::return_type::OK;
+  // Emit a new arm command only once at least one joint moved past the threshold
+  bool arm_changed = false;
+  for(size_t i = 0; i < 6; i++){
+    if(std::fabs(curr_angles_.at(i) - prev_angles_.at(i)) > angle_epsilon_){
+      arm_changed = true;
+      break;
+    }
   }
 
-  if(curr_angles_.at(0) != prev_angles_.at(0) || curr_angles_.at(1) != prev_angles_.at(1) || curr_angles_.at(2) != prev_angles_.at(2) || curr_angles_.at(3) != prev_angles_.at(3) || curr_angles_.at(4) != prev_angles_.at(4) || curr_angles_.at(5) != prev_angles_.at(5)){
+  if(arm_changed){
     // Build the GCODE message for arm movement
-    std::string msg;
+    char msg[160];
     if(board_type_ == "thor_pcb"){
-      msg.append("G0 ");
-      msg.append("A").append(std::to_string(art1)).append(" ");
-      msg.append("B").append(std::to_string(art2)).append(" ");
-      msg.append("C").append(std::to_string(art2)).append(" ");
-      msg.append("D").append(std::to_string(art3)).append(" ");
-      msg.append("X").append(std::to_string(art4)).append(" ");
-      msg.append("Y").append(std::to_string(m_art5)).append(" ");
-      msg.append("Z").append(std::to_string(m_art6)).append("\r\n");
+      std::snprintf(msg, sizeof(msg), "G0 A%.2f B%.2f C%.2f D%.2f X%.2f Y%.2f Z%.2f\r\n",
+                    art1, art2, art2, art3, art4, m_art5, m_art6);
     }
     else{
-      msg.append("G0 ");
-      msg.append("X").append(std::to_string(art1)).append(" ");
-      msg.append("Y").append(std::to_string(art2)).append(" ");
-      msg.append("Z").append(std::to_string(art3)).append(" ");
-      msg.append("U").append(std::to_string(art4)).append(" ");
-      msg.append("V").append(std::to_string(m_art5)).append(" ");
-      msg.append("W").append(std::to_string(m_art6)).append("\r\n");
+      std::snprintf(msg, sizeof(msg), "G0 X%.2f Y%.2f Z%.2f U%.2f V%.2f W%.2f\r\n",
+                    art1, art2, art3, art4, m_art5, m_art6);
     }
 
     // Send the command
     try{
-      RCLCPP_INFO_STREAM(rclcpp::get_logger("ThorInterface"), "Sending new command " << msg);
-      thor_.Write(msg);
+      thor_.Write(std::string(msg));
     }
     catch(...){
       RCLCPP_ERROR_STREAM(rclcpp::get_logger("ThorInterface"), "Something went wrong while sending the message " << msg << " to the port " << port_);
       return hardware_interface::return_type::ERROR;
     }
+
+    // Only mark the indices that were just sent as acknowledged
+    for(size_t i = 0; i < 6; i++){
+      prev_angles_.at(i) = curr_angles_.at(i);
+    }
   }
-  if(curr_angles_.at(6) != prev_angles_.at(6)){
+
+  if(std::fabs(curr_angles_.at(6) - prev_angles_.at(6)) > kGripperEpsilon){
     // Build the GCODE message for end effector movement
-    std::string msg;
+    char msg[64];
     if(board_type_ == "thor_pcb"){
       int pwm_value = static_cast<int>(end_effector * 255 / 180);
-      msg.append("M3 ");
-      msg.append("S").append(std::to_string(pwm_value)).append("\r\n");
+      std::snprintf(msg, sizeof(msg), "M3 S%d\r\n", pwm_value);
     }
     else{
-      msg.append("M280 P0 ");
-      msg.append("S").append(std::to_string(end_effector)).append("\r\n");
+      std::snprintf(msg, sizeof(msg), "M280 P0 S%.2f\r\n", end_effector);
     }
 
     // Send the command
     try{
-      RCLCPP_INFO_STREAM(rclcpp::get_logger("ThorInterface"), "Sending new command " << msg);
-      thor_.Write(msg);
+      thor_.Write(std::string(msg));
     }
     catch(...){
       RCLCPP_ERROR_STREAM(rclcpp::get_logger("ThorInterface"), "Something went wrong while sending the message " << msg << " to the port " << port_);
       return hardware_interface::return_type::ERROR;
     }
 
+    prev_angles_.at(6) = curr_angles_.at(6);
   }
-    prev_angles_ = curr_angles_;
 
-    return hardware_interface::return_type::OK;
-  }
+  return hardware_interface::return_type::OK;
+}
 } // namespace thor_controller
 
 PLUGINLIB_EXPORT_CLASS(thor_controller::ThorInterface, hardware_interface::SystemInterface)
