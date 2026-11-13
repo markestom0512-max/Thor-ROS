@@ -3,6 +3,8 @@
 
     <!-- Load Simulated or Real Hardware Interfaces -->
     <xacro:arg name="is_sim" default="true"/>
+    <!-- use_mock : matériel simulé (mock_components), pour tester la chaîne ROS sans le bras -->
+    <xacro:arg name="use_mock" default="false"/>
 
     <!-- Include Gazebo Parameters -->
     <xacro:include filename="$(find thor_urdf)/urdf/thor_gazebo.xacro" />
