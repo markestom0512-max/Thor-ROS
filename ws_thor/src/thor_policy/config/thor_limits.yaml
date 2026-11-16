@@ -1,0 +1,13 @@
+# Vitesses max réelles de Thor, lues dans RRF le 16 nov. 2026 (Dell, M203 = 1800 « mm »/min = 30 °/s par axe,
+# les axes RRF étant en degrés). Chargé par policy_robot.launch.py.
+#
+# - j1 (X), j4 (U) : 30 °/s (URDF : 33,2) ; j2 (Y), j3 (Z) : URDF 13,2 °/s (RRF permet 30).
+# - Poignet : moteurs V = -q5 + 2 q6 et W = q5 + 2 q6 limités à 30 °/s chacun -> j5 seul <= 30 °/s, j6 seul <= 15 °/s
+#   (URDF : 83 °/s). Le nœud ralentit j5 et j6 ensemble si un des deux moteurs dépasserait 30 °/s.
+# Vérifié en boucle fermée sur le modèle du nœud : 0,43 cm de médiane, 0 % d'échecs, arrivée < 1 cm en 5,6 s
+# (contre 4,3 s avec les vitesses de la simulation).
+# Si M203 change dans RRF, mettre à jour ces valeurs.
+thor_policy:
+  ros__parameters:
+    vmax_deg_s: [30.0, 13.2, 13.2, 30.0, 83.1, 83.1]
+    wrist_motor_vmax_deg_s: 30.0

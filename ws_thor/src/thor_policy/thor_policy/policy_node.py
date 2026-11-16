@@ -14,7 +14,8 @@ Sécurité
   - la policy ne démarre qu'avec /thor_policy/enable, une cible valide et des /joint_states reçus ;
   - cible refusée hors de la zone d'entraînement (r 0,25-0,40 m, azimut 45-135°, z 0,05-0,40 m) ;
   - consignes bornées à safety_factor x butées URDF, et à ±max_excursion_deg autour de la posture de départ ;
-  - vitesse bornée aux vitesses URDF (x vmax_scale) ;
+  - vitesse bornée par articulation (vmax_deg_s) et, pour le poignet, par moteur du différentiel
+    (wrist_motor_vmax_deg_s), le tout x vmax_scale : valeurs du vrai Thor dans config/thor_limits.yaml ;
   - arrêt automatique si l'angle lu s'écarte de l'angle estimé de plus de lag_stop_deg (file RRF qui
     s'allonge, articulation bloquée...). Mettre lag_stop_deg <= 0 pour désactiver (mock).
 """
@@ -42,13 +43,23 @@ class ThorPolicyNode(Node):
         self.declare_parameter("command_topic", "/arm_position_controller/commands")
         self.declare_parameter("safety_factor", 0.95)
         self.declare_parameter("vmax_scale", 1.0)
+        # Vitesses max réelles (°/s). Défaut = URDF ; pour le vrai Thor, voir config/thor_limits.yaml (M203 de RRF).
+        self.declare_parameter("vmax_deg_s", [33.2, 13.2, 13.2, 33.2, 83.1, 83.1])
+        self.declare_parameter("wrist_motor_vmax_deg_s", 0.0)   # 0 = pas de contrainte du différentiel
         self.declare_parameter("max_excursion_deg", 0.0)   # 0 = pas de limite autour de la posture de départ
         self.declare_parameter("lag_stop_deg", 10.0)
         self.declare_parameter("log_period_s", 1.0)
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
-        self.core = PolicyCore(p("model_path"), safety_factor=p("safety_factor"), vmax_scale=p("vmax_scale"))
+        wrist = p("wrist_motor_vmax_deg_s")
+        self.core = PolicyCore(
+            p("model_path"), safety_factor=p("safety_factor"), vmax_scale=p("vmax_scale"),
+            vmax=np.radians(np.array(p("vmax_deg_s"), dtype=float)),
+            wrist_motor_vmax=math.radians(wrist) if wrist > 0 else None)
         self.get_logger().info(f"Policy chargée : {p('model_path')}")
+        self.get_logger().info(
+            f"Vitesses max (°/s) : {[round(v, 1) for v in np.degrees(self.core.vmax)]}, moteurs du poignet : "
+            + (f"{math.degrees(self.core.wrist_motor_vmax):.1f}°/s" if self.core.wrist_motor_vmax else "sans contrainte"))
 
         self.q_meas = None
         self.target = None

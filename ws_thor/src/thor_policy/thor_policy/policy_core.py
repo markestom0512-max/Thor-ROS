@@ -68,13 +68,18 @@ def build_obs(q, qd, target_xyz, last_action, target_quat=TARGET_QUAT):
 class PolicyCore:
     """Policy + modèle d'articulation en boucle ouverte. Un appel à step() = un pas de 1/30 s."""
 
-    def __init__(self, onnx_path, safety_factor=0.95, vmax_scale=1.0):
+    def __init__(self, onnx_path, safety_factor=0.95, vmax_scale=1.0, vmax=None, wrist_motor_vmax=None):
+        """vmax : vitesses max par articulation (rad/s), défaut = URDF (celles de la simulation).
+        wrist_motor_vmax : vitesse max (rad/s) de CHAQUE moteur du différentiel du poignet de Thor
+        (moteur V = -q5 + 2 q6, moteur W = q5 + 2 q6, cf. thor_interface.cpp) ; None = pas de contrainte.
+        Les deux sont multipliés par vmax_scale."""
         import onnxruntime as ort
 
         self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
         self.in_name = self.sess.get_inputs()[0].name
         self.lo, self.hi = -safety_factor * LIMITS, safety_factor * LIMITS
-        self.vmax = vmax_scale * VMAX
+        self.vmax = vmax_scale * (VMAX if vmax is None else np.asarray(vmax, dtype=float))
+        self.wrist_motor_vmax = None if not wrist_motor_vmax else vmax_scale * float(wrist_motor_vmax)
         self.reset(np.zeros(6))
 
     def infer(self, obs):
@@ -96,6 +101,11 @@ class PolicyCore:
         a_raw = self.infer(obs)
         a = np.clip(a_raw, -CLIP_ACTIONS, CLIP_ACTIONS)
         v = np.clip(K_OVER_D * ACTION_SCALE * a, -self.vmax, self.vmax)   # vitesse demandée (rad/s)
+        if self.wrist_motor_vmax is not None:
+            # différentiel du poignet : on ralentit j5 et j6 ensemble (même direction de mouvement)
+            m = max(abs(-v[4] + 2 * v[5]), abs(v[4] + 2 * v[5]))
+            if m > self.wrist_motor_vmax:
+                v[4:6] *= self.wrist_motor_vmax / m
         q_cmd = np.clip(self.q + v * DT, self.box_lo, self.box_hi)
         self.qd = (q_cmd - self.q) / DT
         self.q = q_cmd

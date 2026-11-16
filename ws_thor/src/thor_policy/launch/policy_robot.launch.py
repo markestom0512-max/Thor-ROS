@@ -31,6 +31,7 @@ def generate_launch_description():
     robot_description = ParameterValue(
         Command(["xacro ", xacro_file, " is_sim:=False use_mock:=", use_mock]), value_type=str)
     controllers = os.path.join(share, "config", "policy_controllers.yaml")
+    limits = os.path.join(share, "config", "thor_limits.yaml")   # vitesses max du vrai Thor (RRF)
 
     def spawner(name):
         return Node(package="controller_manager", executable="spawner",
@@ -43,7 +44,7 @@ def generate_launch_description():
         DeclareLaunchArgument("max_excursion_deg", default_value="0.0",
                               description="Débattement max autour de la posture de départ (0 = pas de limite)"),
         DeclareLaunchArgument("vmax_scale", default_value="1.0",
-                              description="Facteur sur les vitesses max de l'URDF (< 1 pour aller plus doucement)"),
+                              description="Facteur sur les vitesses max de config/thor_limits.yaml (< 1 pour aller plus doucement)"),
         DeclareLaunchArgument("lag_stop_deg", default_value="10.0",
                               description="Arrêt si angle lu et angle estimé s'écartent de plus de X degrés (0 = jamais)"),
 
@@ -57,7 +58,7 @@ def generate_launch_description():
         Node(package="rviz2", executable="rviz2", arguments=["-d", os.path.join(share, "rviz", "policy.rviz")],
              condition=IfCondition(rviz)),
         Node(package="thor_policy", executable="policy_node", output="screen",
-             parameters=[{
+             parameters=[limits, {
                  "max_excursion_deg": ParameterValue(max_exc, value_type=float),
                  "vmax_scale": ParameterValue(vmax_scale, value_type=float),
                  "lag_stop_deg": ParameterValue(lag_stop, value_type=float),

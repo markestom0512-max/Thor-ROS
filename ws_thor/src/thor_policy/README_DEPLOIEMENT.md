@@ -103,9 +103,13 @@ il doit donner exactement les mêmes chiffres que sur TomLinux.
 
 ## 3. Au kot, avant la policy (dans cet ordre)
 
-1. **Relever la config RRF** (console RRF) : `M92`, `M203`, `M201`, `M566`, `M208`, `M584`, `M569 P0.0` … `P0.6`.
-   `M203` doit être **au moins** égal aux vitesses de l'URDF (en °/min si les axes sont en degrés) :
-   j1 1992, j2 791, j3 791, j4 1992, j5 et j6 4985 (attention au différentiel de j5/j6).
+1. **Config RRF** (relevée le 16 nov. 2026 sur le Dell ; les « mm » de RRF sont des degrés) :
+   `M203` 1800 °/min = 30 °/s sur tous les axes, `M201` 200 °/s², `M566` 60 °/min = 1 °/s, `M208` = butées URDF,
+   `M584` X0.6 Y0.4:0.5 Z0.3 U0.2 V0.0 W0.1, `M906` 800 mA. Le poignet (moteurs V, W en différentiel) ne
+   permet que j5 ≤ 30 °/s et j6 ≤ 15 °/s, contre 83 °/s en simulation : le nœud applique ces limites
+   (`config/thor_limits.yaml`). Précision inchangée, arrivée un peu plus lente (5,6 s au lieu de 4,3 s).
+   **À surveiller** : `M566` (1 °/s) est très bas ; si RRF freine à chaque segment de 1/30 s, le bras avancera
+   par à-coups et `écart lu/estimé` montera. Si M203 change, mettre à jour `config/thor_limits.yaml`.
 2. **Résolution des consignes** : `grep -n "static_cast<int>" ws_thor/src/thor_controller/src/thor_interface.cpp`.
    Le commit 744d7ef du fork (7 oct.) envoie des angles en flottant ; si le Dell en est resté à la version
    d'AngelLM, `write()` tronque au degré entier, soit environ 7 mm d'erreur au bout du bras.
@@ -144,6 +148,8 @@ il doit donner exactement les mêmes chiffres que sur TomLinux.
 | `model_path` | `share/thor_policy/models/policy_rel_model999.onnx` | policy ONNX |
 | `command_topic` | `/arm_position_controller/commands` | consignes (Float64MultiArray, 6 valeurs) |
 | `safety_factor` | 0,95 | consignes bornées à 95 % des butées URDF (0,90 dégrade la policy : 12 % d'échecs) |
-| `vmax_scale` | 1,0 | facteur sur les vitesses URDF |
+| `vmax_deg_s` | URDF, ou `config/thor_limits.yaml` via le launch | vitesses max par articulation (°/s) |
+| `wrist_motor_vmax_deg_s` | 0 (aucune), 30 via le launch | vitesse max de chaque moteur du différentiel du poignet |
+| `vmax_scale` | 1,0 | facteur sur toutes les vitesses max |
 | `max_excursion_deg` | 0 | débattement max autour de la posture de départ (0 = sans limite) |
 | `lag_stop_deg` | 10 | arrêt si angle lu et angle estimé s'écartent de plus de X° (0 = jamais) |
